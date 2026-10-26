@@ -22,39 +22,10 @@
   var NEED_TYPES = ["Children's clothing", 'Woollens', 'School materials', 'Utensils'];
   var NEED_CAT = { "Children's clothing": 'Clothes', 'Woollens': 'Clothes', 'School materials': 'Books', 'Utensils': 'Utensils' };
   var DEADLINES = [['In 3 days', 3], ['In 1 week', 7], ['In 2 weeks', 14]];
-  var BASE_ITEMS = 1284, BASE_KG = 642;
 
-  // ---------- seed data (from the design) ----------
-  function seed() {
-    var now = Date.now(), h = 3600000;
-    var mine = [
-      { title: 'Steel tiffin set', cat: 'Utensils', cond: 'Clean and usable', hand: 'drop', where: 'Carter Road promenade', when: 'Open daily, 8 am to 8 pm', dist: '0.6 km', secs: 36 * 3600, stage: 1, owner: 'me', photoLabel: 'photo · tiffin set', count: 1 },
-      { title: "Kids' school shoes", cat: 'Clothes', cond: 'Clean and usable', hand: 'drop', where: 'Hill Road, near St Peter\'s', when: 'Tue 28 Oct', dist: '0.9 km', secs: 30 * 3600, stage: 2, owner: 'me', claimedBy: 'Goonj', photoLabel: 'photo · school shoes', count: 2 },
-      { title: 'Paperback novels (6)', cat: 'Books', cond: 'Minor wear', hand: 'pick', where: 'Pali Hill, Bandra West', when: 'Sat 25 Oct, 9 to 11 am', dist: '1.1 km', secs: 20 * 3600, stage: 3, owner: 'me', claimedBy: 'Asha Learning Centre', photoLabel: 'photo · novels', count: 6 }
-    ];
-    var others = [
-      { title: 'Denim jackets (2)', cat: 'Clothes', dist: '0.8 km', cond: 'Clean and usable', secs: 5 * 3600 + 1240, photoLabel: 'photo · denim jackets', count: 2, hand: 'drop', where: 'Carter Road promenade', when: 'Open daily, 8 am to 8 pm' },
-      { title: 'Steel tiffin set', cat: 'Utensils', dist: '1.2 km', cond: 'Minor wear', secs: 2 * 3600 + 14, photoLabel: 'photo · tiffin set', count: 1, hand: 'pick', where: 'Pali Hill, Bandra West', when: 'Tue 28 Oct, 4 to 6 pm' },
-      { title: 'NCERT textbooks, Class 6', cat: 'Books', dist: '0.5 km', cond: 'Clean and usable', secs: 22 * 3600, photoLabel: 'photo · textbooks', count: 8, hand: 'drop', where: 'Hill Road, near St Peter\'s', when: 'Open daily, 9 am to 7 pm' },
-      { title: 'Table fan', cat: 'Electronics', dist: '2.1 km', cond: 'Minor wear', secs: 46 * 60 + 30, photoLabel: 'photo · table fan', count: 1, hand: 'pick', where: 'G Block, BKC', when: 'Mon 27 Oct, 12 to 2 pm' },
-      { title: 'Woollen sweaters (4)', cat: 'Clothes', dist: '1.6 km', cond: 'Clean and usable', secs: 9 * 3600 + 600, photoLabel: 'photo · sweaters', count: 4, hand: 'drop', where: 'Linking Road', when: 'Open daily, 8 am to 8 pm' },
-      { title: 'Pressure cooker', cat: 'Utensils', dist: '0.9 km', cond: 'Clean and usable', secs: 90, photoLabel: 'photo · pressure cooker', count: 1, hand: 'pick', where: 'Kalanagar, Bandra East', when: 'Wed 29 Oct, 9 to 11 am' }
-    ];
-    var all = mine.concat(others.map(function (o) { o.owner = 'other'; o.stage = 1; return o; }));
-    all.forEach(function (l, i) {
-      l.id = 'seed' + i;
-      l.createdAt = now - (HOURS_TO_CLAIM * h - l.secs * 1000);
-      l.expiresAt = now + l.secs * 1000;
-      l.kg = +(KG[l.cat] * l.count).toFixed(1);
-      delete l.secs;
-    });
-    var needs = [
-      { id: 'n1', org: 'Goonj', need: "Children's clothing", detail: 'Ages 4 to 12 · 40 pieces · by 2 Nov', photoLabel: 'photo · kids clothing' },
-      { id: 'n2', org: 'Bandra Seva Trust', need: 'Woollens', detail: 'Sweaters, shawls · 25 pieces · by 5 Nov', photoLabel: 'photo · woollens' },
-      { id: 'n3', org: 'Asha Learning Centre', need: 'School materials', detail: 'Books, geometry boxes · by 8 Nov', photoLabel: 'photo · school kit' }
-    ];
-    return { role: 'donor', listings: all, needs: needs, seededAt: now };
-  }
+  // ---------- starting data ----------
+  // The site starts empty. Donors create listings, organisations claim them and post needs.
+  function seed() { return { role: 'donor', listings: [], needs: [], createdAt: Date.now() }; }
 
   // ---------- storage ----------
   var KEY = 'passon-v1';
@@ -185,9 +156,9 @@
   // ---------- screens ----------
   function homeHTML() {
     var items = activeMine();
-    var received = myListings().filter(function (l) { return l.stage === 3; });
-    var totalItems = BASE_ITEMS + received.length;
-    var totalKg = Math.round(BASE_KG + received.reduce(function (a, l) { return a + l.kg; }, 0));
+    var received = db.listings.filter(function (l) { return l.stage === 3; });
+    var totalItems = received.length;
+    var totalKg = Math.round(received.reduce(function (a, l) { return a + l.kg; }, 0) * 10) / 10;
     var cards = items.map(function (l, i) {
       var isNew = state.justPosted === l.id;
       return '<a href="#listing/' + l.id + '" class="card ' + (isNew ? 'drop' : 'rise') + '" style="animation-delay:' + (isNew ? 0 : 300 + i * 90) + 'ms">' +
@@ -201,6 +172,7 @@
         '<span class="need-org"><i class="ti ti-rosette-discount-check"></i>' + esc(n.org) + '</span><span class="need-title">' + esc(n.need) + '</span><span class="small">' + esc(n.detail) + '</span>' +
         '<button class="btn-tint" style="margin-top:4px" data-action="donate-need" data-cat="' + esc(NEED_CAT[n.need] || '') + '"><i class="ti ti-gift"></i>Donate this</button></div></div>';
     }).join('');
+    if (!db.needs.length) needs = '<div class="need" style="--d:200ms;width:100%;padding:20px 16px;align-items:center;text-align:center;gap:8px"><div class="ic" style="width:48px;height:48px;border-radius:50%;background:var(--tint);color:var(--green);display:flex;align-items:center;justify-content:center"><i class="ti ti-clipboard-list" style="font-size:24px"></i></div><span class="card-title">No needs posted yet</span><span class="small">When an NGO posts what it needs, it shows here.</span></div>';
     return topbarHTML() +
       '<div style="padding:8px 16px 0;display:flex;flex-direction:column;gap:4px"><div class="title">Hi Riya, what can you pass on today?</div><div class="row" style="font-size:15px;color:var(--muted);gap:4px"><i class="ti ti-map-pin" style="font-size:16px"></i>Bandra West</div></div>' +
       '<div style="padding:20px 16px 0"><a href="#give" class="btn-give"><i class="ti ti-gift"></i>Give an item</a></div>' +
@@ -295,6 +267,7 @@
         '<div class="row" style="gap:12px"><div class="thumb"' + photoStyle(l) + '>' + (l.photo ? '' : 'photo') + '</div><div class="grow" style="display:flex;flex-direction:column;gap:2px"><span class="card-title">' + esc(l.title) + '</span><span class="card-status">' + esc(statusText(l)) + '</span></div></div>' +
         trailHTML(l.stage, false) + '</a>';
     }).join('');
+    if (!mine.length) cards = '<div class="empty" style="padding:32px 16px"><div class="ic"><i class="ti ti-list-check"></i></div><span class="section-title">No listings yet</span><span class="sub">Items you give will show up here with their status.</span><a href="#give" class="btn" style="max-width:240px"><i class="ti ti-gift"></i>Give an item</a></div>';
     return topbarHTML() + '<div style="padding:8px 16px 112px" class="col"><div class="title">Your listings</div><div class="small">Every item you have passed on, with its status.</div>' + cards + '</div>';
   }
   function detailHTML(id) {
@@ -330,7 +303,7 @@
       '<div class="role-card' + (!donor ? ' on' : '') + '"><div class="role-head"><div class="hand-ic"><i class="ti ti-building-community"></i></div><div><div class="hand-title">Organisation</div><div class="small">' + ORG_NAME + ' · verified NGO · ' + claimed + ' claimed</div></div></div>' +
       '<div class="role-list"><span><i class="ti ti-circle-check"></i>See every unclaimed listing nearby</span><span><i class="ti ti-circle-check"></i>Claim items with full handover details</span><span><i class="ti ti-circle-check"></i>Post what your community needs</span><span class="no"><i class="ti ti-ban"></i>No chat, no payments</span></div>' +
       (!donor ? '<div class="tag" style="align-self:flex-start"><i class="ti ti-check"></i>Signed in as ' + ORG_NAME + '</div>' : '<button class="btn-outline" data-action="switch" data-role="org"><i class="ti ti-switch-horizontal"></i>Switch to organisation</button>') + '</div>' +
-      '<div class="demo"><span class="section-title" style="font-size:16px">Testing tools</span><span class="small">For checking the expiry rule and resetting the demo.</span>' +
+      '<div class="demo"><span class="section-title" style="font-size:16px">Testing tools</span><span class="small">For checking the expiry rule and starting fresh.</span>' +
       '<button class="btn-small" data-action="test-listing"><i class="ti ti-hourglass"></i>Add a listing that expires in 2 minutes</button>' +
       '<button class="btn-small" data-action="reset"><i class="ti ti-trash"></i>Reset demo data</button></div></div>';
   }
@@ -348,7 +321,7 @@
         '<div class="drow"><i class="ti ' + (l.hand === 'drop' ? 'ti-clock' : 'ti-calendar') + '"></i><span><b>' + (l.hand === 'drop' ? 'Open hours' : 'Pickup slot') + '</b>' + esc(l.when) + '</span></div>' +
         '<button class="btn-tint" data-action="received" data-id="' + l.id + '"><i class="ti ti-heart-handshake"></i>Mark as received</button></div></div></div></div></div>';
     }).join('');
-    if (!items.length) cards = '<div class="empty"><div class="ic"><i class="ti ti-inbox"></i></div><span class="section-title">Nothing here right now</span><span class="sub">New listings from donors in Bandra and BKC will show up here.</span></div>';
+    if (!items.length) cards = '<div class="empty"><div class="ic"><i class="ti ti-inbox"></i></div><span class="section-title">Nothing here right now</span><span class="sub">No donor has listed anything yet. When someone in Bandra or BKC gives an item, it appears here to claim.</span></div>';
     var count = items.length;
     return topbarHTML() +
       '<div style="padding:8px 16px 4px;display:flex;flex-direction:column;gap:4px"><div class="title">Listings near ' + ORG_NAME + '</div><div class="small" id="feedCount">' + count + ' item' + (count === 1 ? '' : 's') + ' waiting · claim before they expire</div></div>' +
@@ -361,6 +334,7 @@
     var list = db.needs.map(function (x, i) {
       return '<div class="need-row" style="--d:' + (i * 80) + 'ms"><span class="need-org"><i class="ti ti-rosette-discount-check"></i>' + esc(x.org) + '</span><span style="font-weight:600;font-size:16px">' + esc(x.need) + '</span><span class="small">' + esc(x.detail) + '</span></div>';
     }).join('');
+    if (!db.needs.length) list = '<span class="small">Nothing posted yet. Your first need will appear here and on every donor\'s home screen.</span>';
     return topbarHTML() + '<div class="col" style="padding:8px 16px 112px;gap:16px">' +
       '<div class="title">Post a need</div><div class="small">Tell donors what your community needs. It shows on their home screen.</div>' +
       '<div class="col" style="gap:10px"><span class="lab"><i class="ti ti-clipboard-list"></i>Item type</span><div class="opts" style="grid-template-columns:1fr 1fr">' + types + '</div></div>' +
@@ -516,7 +490,7 @@
       db.listings.unshift({ id: 't' + Date.now(), title: 'Test listing', cat: 'Books', cond: 'Clean and usable', count: 1, kg: 0.3, owner: 'other', stage: 1, hand: 'drop', where: 'Carter Road promenade', when: 'Open daily, 8 am to 8 pm', dist: '0.6 km', photoLabel: 'photo · test item', createdAt: Date.now(), expiresAt: Date.now() + 120000 });
       save(); toast('Added. Open the organisation feed to watch it expire.', 'ti-hourglass');
     }
-    else if (a === 'reset') { localStorage.removeItem(KEY); state.removed = {}; state.fading = {}; state.filter = 'All'; state.claimedOpen = null; load(); render(); toast('Demo data reset.', 'ti-refresh'); }
+    else if (a === 'reset') { localStorage.removeItem(KEY); state.removed = {}; state.fading = {}; state.filter = 'All'; state.claimedOpen = null; load(); render(); toast('All data cleared.', 'ti-refresh'); }
   });
 
   // Keep a listing's step 1 photo tap working with the keyboard too
