@@ -63,6 +63,10 @@ button:disabled{cursor:not-allowed}
 .ti-user-circle:before{content:"\ef68"}
 .ti-weight:before{content:"\f589"}
 
+.ti-users:before{content:"\ebf2"}
+
+.ti-lock:before{content:"\eae2"}
+
 /* animations from the design */
 @keyframes pageIn{from{transform:translateX(40px);opacity:0}to{transform:none;opacity:1}}
 @keyframes rise{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
@@ -327,3 +331,20 @@ button:disabled{cursor:not-allowed}
 
 .hidden{display:none !important}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+
+/* sign in and terms */
+.who{display:flex;align-items:center;gap:6px;background:#fff;border:1px solid var(--line);border-radius:999px;padding:7px 12px;color:var(--text);font-size:13px;font-weight:600;text-decoration:none;max-width:170px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.who .ti{font-size:16px;color:var(--green);flex:none}
+.auth{flex:1;overflow-y:auto;padding:40px 20px 24px;display:flex;flex-direction:column;gap:20px}
+.auth-hero{display:flex;flex-direction:column;align-items:center;gap:10px;text-align:center}
+.seg{display:grid;grid-template-columns:1fr 1fr;background:#fff;border:1px solid var(--line);border-radius:999px;padding:4px;gap:4px}
+.seg button{display:flex;align-items:center;justify-content:center;gap:6px;border:none;background:transparent;color:var(--muted2);font-size:15px;font-weight:500;min-height:44px;border-radius:999px;cursor:pointer;transition:background 200ms,color 200ms}
+.seg button .ti{font-size:18px}
+.seg button.on{background:var(--green);color:#fff;font-weight:600}
+.field{display:flex;flex-direction:column;gap:8px}
+.field input{width:100%;min-height:52px;border-radius:14px;border:1.5px solid var(--line);background:#fff;padding:0 14px;font:inherit;font-size:16px;color:var(--text);outline:none;transition:border-color 200ms,box-shadow 200ms}
+.field input:focus{border-color:var(--green);box-shadow:0 0 0 4px rgba(46,125,50,.14)}
+.terms{display:flex;flex-direction:column;gap:12px;background:#fff;border:1px solid var(--line);border-radius:18px;padding:14px}
+.term{display:flex;gap:10px;align-items:flex-start;font-size:15px;line-height:1.45;color:var(--muted2)}
+.term .ti{font-size:20px;color:var(--green);flex:none;margin-top:1px}
+.term b{color:var(--text);font-weight:600}

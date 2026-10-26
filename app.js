@@ -7,7 +7,6 @@
 
   // ---------- constants ----------
   var HOURS_TO_CLAIM = 48;
-  var ORG_NAME = 'Goonj';
   var KG = { Clothes: 0.5, Utensils: 1.0, Books: 0.3, Electronics: 1.5 }; // average weight per item, by category
   var CATS = [['Clothes', 'ti-shirt'], ['Utensils', 'ti-tools-kitchen-2'], ['Books', 'ti-book'], ['Electronics', 'ti-plug']];
   var CONDS = [['Clean and usable', 'Washed, works, nothing missing'], ['Minor wear', 'Small marks or fading, fully usable']];
@@ -24,22 +23,31 @@
   var DEADLINES = [['In 3 days', 3], ['In 1 week', 7], ['In 2 weeks', 14]];
 
   // ---------- starting data ----------
-  // The site starts empty. Donors create listings, organisations claim them and post needs.
-  function seed() { return { role: 'donor', listings: [], needs: [], createdAt: Date.now() }; }
+  // The site starts empty. People create accounts, donors create listings, organisations claim them and post needs.
+  function seed() { return { accounts: {}, session: null, listings: [], needs: [], createdAt: Date.now() }; }
 
   // ---------- storage ----------
-  var KEY = 'passon-v1';
+  var KEY = 'passon-v2';
   var db;
   function load() {
     try { db = JSON.parse(localStorage.getItem(KEY)); } catch (e) { db = null; }
-    if (!db || !db.listings) { db = seed(); save(); }
+    if (!db || !db.listings || !db.accounts) { db = seed(); save(); }
   }
+  // Simple scramble so the password is not stored as plain text. This is a prototype, not a real login system.
+  function scramble(str) {
+    var h = 5381;
+    for (var i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0;
+    return 'p' + (h >>> 0).toString(36) + str.length;
+  }
+  function me() { return db.session ? db.accounts[db.session] : null; }
+  function role() { var m = me(); return m ? m.role : null; }
+  function myName() { var m = me(); return m ? m.name : ''; }
   function save() {
     try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) { /* storage full or blocked, keep going in memory */ }
   }
 
   // ---------- helpers ----------
-  var state = { draft: freshDraft(), filter: 'All', claimedOpen: null, justPosted: null, need: { type: 0, qty: 20, deadline: 1 }, pulsed: false, counted: false };
+  var state = { draft: freshDraft(), filter: 'All', claimedOpen: null, justPosted: null, need: { type: 0, qty: 20, deadline: 1 }, auth: { mode: 'signin', role: 'donor' }, terms: { terms: false, consent: false } };
   function freshDraft() { return { photo: null, status: 'none', cat: null, cond: null, hand: 'drop', point: 0, date: 1, slot: 1 }; }
   function $(s, r) { return (r || document).querySelector(s); }
   function $$(s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); }
@@ -64,13 +72,13 @@
     var hrs = Math.ceil(left(l) / 3600);
     return 'Listed · waiting for an NGO · ' + hrs + 'h to claim';
   }
-  function myListings() { return db.listings.filter(function (l) { return l.owner === 'me'; }); }
+  function myListings() { return db.listings.filter(function (l) { return l.owner === myName(); }); }
   function activeMine() { return myListings().filter(function (l) { return l.stage < 3 && !isExpired(l); }); }
   function feedListings() {
     return db.listings.filter(function (l) {
       if (state.removed[l.id]) return false;
       if (l.stage === 1) return left(l) > 0 || state.fading[l.id];
-      return l.stage === 2 && l.claimedBy === ORG_NAME;
+      return l.stage === 2 && l.claimedBy === myName();
     });
   }
   state.removed = {};
@@ -91,11 +99,9 @@
     return '<span class="countdown' + (amber ? ' amber' : '') + (extra ? ' ' + extra : '') + '" data-countdown="' + l.id + '"><i class="ti ti-hourglass"></i>' + fmt(s) + '</span>';
   }
   function topbarHTML() {
-    var donor = db.role === 'donor';
+    var donor = role() === 'donor';
     return '<div class="topbar"><div class="logo"><div class="logo-mark"><i class="ti ti-arrow-forward-up"></i></div><span class="logo-text">PassOn</span></div>' +
-      '<div class="role-switch" role="group" aria-label="Account type">' +
-      '<button class="' + (donor ? 'on' : '') + '" data-action="switch" data-role="donor"><i class="ti ti-user"></i>Donor</button>' +
-      '<button class="' + (!donor ? 'on' : '') + '" data-action="switch" data-role="org"><i class="ti ti-building-community"></i>Organisation</button></div></div>';
+      '<a href="#account" class="who"><i class="ti ' + (donor ? 'ti-user' : 'ti-building-community') + '"></i>' + esc(myName()) + '</a></div>';
   }
   function toast(msg, icon) {
     var old = $('.toast'); if (old) old.remove();
@@ -106,19 +112,24 @@
   }
 
   // ---------- routing ----------
-  function route() { return location.hash.replace('#', '') || (db.role === 'donor' ? 'home' : 'feed'); }
+  function route() { return location.hash.replace('#', '') || (role() === 'donor' ? 'home' : 'feed'); }
   function go(r) { if (route() === r) render(); else location.hash = r; }
   window.addEventListener('hashchange', render);
 
   function render() {
-    var r = route(), donor = db.role === 'donor';
+    var r = route(), donor = role() === 'donor';
+    if (!me()) { if (r !== 'signin') { location.hash = 'signin'; return; } }
+    else if (!me().accepted) { if (r !== 'terms') { location.hash = 'terms'; return; } }
+    else if (r === 'signin' || r === 'terms') { location.hash = donor ? 'home' : 'feed'; return; }
     var donorOnly = ['home', 'give', 'give-details', 'give-handover', 'posted', 'listings'];
     var orgOnly = ['feed', 'needs'];
     if (!donor && (donorOnly.indexOf(r) >= 0 || r.indexOf('listing/') === 0)) { location.hash = 'feed'; return; }
     if (donor && orgOnly.indexOf(r) >= 0) { location.hash = 'home'; return; }
 
     var screen = $('#screen'), html = '', tabs = true, scroll = true;
-    if (r === 'home') html = homeHTML();
+    if (r === 'signin') { html = signinHTML(); tabs = false; scroll = false; }
+    else if (r === 'terms') { html = termsHTML(); tabs = false; scroll = false; }
+    else if (r === 'home') html = homeHTML();
     else if (r === 'give') { html = step1HTML(); tabs = false; scroll = false; }
     else if (r === 'give-details') { html = step2HTML(); tabs = false; scroll = false; }
     else if (r === 'give-handover') { html = step3HTML(); tabs = false; scroll = false; }
@@ -142,7 +153,7 @@
   function renderTabs(show, r) {
     var bar = $('#tabbar');
     if (!show) { bar.className = 'tabbar hidden'; return; }
-    var donor = db.role === 'donor';
+    var donor = role() === 'donor';
     var items = donor
       ? [['home', 'ti-home', 'Home'], ['give', 'ti-gift', 'Give'], ['listings', 'ti-list-check', 'Listings'], ['account', 'ti-user-circle', 'Account']]
       : [['feed', 'ti-layout-grid', 'Feed'], ['needs', 'ti-clipboard-list', 'Needs'], ['account', 'ti-user-circle', 'Account']];
@@ -174,7 +185,7 @@
     }).join('');
     if (!db.needs.length) needs = '<div class="need" style="--d:200ms;width:100%;padding:20px 16px;align-items:center;text-align:center;gap:8px"><div class="ic" style="width:48px;height:48px;border-radius:50%;background:var(--tint);color:var(--green);display:flex;align-items:center;justify-content:center"><i class="ti ti-clipboard-list" style="font-size:24px"></i></div><span class="card-title">No needs posted yet</span><span class="small">When an NGO posts what it needs, it shows here.</span></div>';
     return topbarHTML() +
-      '<div style="padding:8px 16px 0;display:flex;flex-direction:column;gap:4px"><div class="title">Hi Riya, what can you pass on today?</div><div class="row" style="font-size:15px;color:var(--muted);gap:4px"><i class="ti ti-map-pin" style="font-size:16px"></i>Bandra West</div></div>' +
+      '<div style="padding:8px 16px 0;display:flex;flex-direction:column;gap:4px"><div class="title">Hi ' + esc(myName()) + ', what can you pass on today?</div><div class="row" style="font-size:15px;color:var(--muted);gap:4px"><i class="ti ti-map-pin" style="font-size:16px"></i>Bandra West</div></div>' +
       '<div style="padding:20px 16px 0"><a href="#give" class="btn-give"><i class="ti ti-gift"></i>Give an item</a></div>' +
       '<div class="counters"><div class="counter"><i class="ti ti-package"></i><span class="num" data-count="' + totalItems + '">0</span><span class="lbl">Items donated</span></div>' +
       '<div class="counter"><i class="ti ti-leaf"></i><span class="num"><span data-count="' + totalKg + '">0</span> kg</span><span class="lbl">Kg diverted from landfill</span></div></div>' +
@@ -293,19 +304,59 @@
       '<span class="note"><i class="ti ti-leaf"></i>Weight uses the PassOn average for ' + esc(l.cat.toLowerCase()) + ' (' + KG[l.cat] + ' kg per item).</span></div>';
   }
   function accountHTML() {
-    var donor = db.role === 'donor';
-    var mine = myListings().length, claimed = db.listings.filter(function (l) { return l.stage >= 2 && l.claimedBy === ORG_NAME; }).length;
+    var m = me(), donor = m.role === 'donor';
+    var mine = myListings().length, claimed = db.listings.filter(function (l) { return l.stage >= 2 && l.claimedBy === myName(); }).length;
+    var received = db.listings.filter(function (l) { return l.stage === 3 && (donor ? l.owner === myName() : l.claimedBy === myName()); }).length;
+    var since = new Date(m.createdAt);
+    var when = since.getDate() + ' ' + ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][since.getMonth()] + ' ' + since.getFullYear();
     return topbarHTML() + '<div class="col" style="padding:8px 16px 112px;gap:14px">' +
-      '<div class="title">Account</div><div class="small">Choose how you use PassOn. Only verified organisations can see and claim listings.</div>' +
-      '<div class="role-card' + (donor ? ' on' : '') + '"><div class="role-head"><div class="hand-ic"><i class="ti ti-user"></i></div><div><div class="hand-title">Donor</div><div class="small">Riya · Bandra West · ' + mine + ' listings</div></div></div>' +
-      '<div class="role-list"><span><i class="ti ti-circle-check"></i>List items in under 30 seconds</span><span><i class="ti ti-circle-check"></i>Track every donation on a status trail</span><span><i class="ti ti-circle-check"></i>See what NGOs need right now</span><span class="no"><i class="ti ti-ban"></i>No browsing or claiming other listings</span></div>' +
-      (donor ? '<div class="tag" style="align-self:flex-start"><i class="ti ti-check"></i>Signed in as donor</div>' : '<button class="btn-outline" data-action="switch" data-role="donor"><i class="ti ti-switch-horizontal"></i>Switch to donor</button>') + '</div>' +
-      '<div class="role-card' + (!donor ? ' on' : '') + '"><div class="role-head"><div class="hand-ic"><i class="ti ti-building-community"></i></div><div><div class="hand-title">Organisation</div><div class="small">' + ORG_NAME + ' · verified NGO · ' + claimed + ' claimed</div></div></div>' +
-      '<div class="role-list"><span><i class="ti ti-circle-check"></i>See every unclaimed listing nearby</span><span><i class="ti ti-circle-check"></i>Claim items with full handover details</span><span><i class="ti ti-circle-check"></i>Post what your community needs</span><span class="no"><i class="ti ti-ban"></i>No chat, no payments</span></div>' +
-      (!donor ? '<div class="tag" style="align-self:flex-start"><i class="ti ti-check"></i>Signed in as ' + ORG_NAME + '</div>' : '<button class="btn-outline" data-action="switch" data-role="org"><i class="ti ti-switch-horizontal"></i>Switch to organisation</button>') + '</div>' +
+      '<div class="title">Account</div>' +
+      '<div class="role-card on"><div class="role-head"><div class="hand-ic"><i class="ti ' + (donor ? 'ti-user' : 'ti-building-community') + '"></i></div><div><div class="hand-title">' + esc(myName()) + '</div><div class="small">' + (donor ? 'Donor' : 'Organisation') + ' · Bandra and BKC · joined ' + when + '</div></div></div>' +
+      (donor
+        ? '<div class="role-list"><span><i class="ti ti-circle-check"></i>' + mine + ' item' + (mine === 1 ? '' : 's') + ' listed</span><span><i class="ti ti-circle-check"></i>' + received + ' received by an NGO</span><span class="no"><i class="ti ti-ban"></i>Donors cannot browse or claim listings</span></div>'
+        : '<div class="role-list"><span><i class="ti ti-circle-check"></i>' + claimed + ' item' + (claimed === 1 ? '' : 's') + ' claimed</span><span><i class="ti ti-circle-check"></i>' + received + ' received</span><span class="no"><i class="ti ti-ban"></i>No chat, no payments</span></div>') +
+      '<div class="small row" style="gap:6px"><i class="ti ti-rosette-discount-check" style="font-size:16px;color:var(--green)"></i>Terms accepted. Your data stays on this device.</div>' +
+      '<button class="btn-outline" data-action="signout"><i class="ti ti-switch-horizontal"></i>Sign out</button></div>' +
       '<div class="demo"><span class="section-title" style="font-size:16px">Testing tools</span><span class="small">For checking the expiry rule and starting fresh.</span>' +
       '<button class="btn-small" data-action="test-listing"><i class="ti ti-hourglass"></i>Add a listing that expires in 2 minutes</button>' +
-      '<button class="btn-small" data-action="reset"><i class="ti ti-trash"></i>Reset demo data</button></div></div>';
+      '<button class="btn-small" data-action="reset"><i class="ti ti-trash"></i>Clear all data and accounts</button></div></div>';
+  }
+  function signinHTML() {
+    var create = state.auth.mode === 'create', donorRole = state.auth.role === 'donor';
+    return '<div class="auth">' +
+      '<div class="auth-hero"><div class="logo-mark" style="width:56px;height:56px;border-radius:16px"><i class="ti ti-arrow-forward-up" style="font-size:30px"></i></div><div class="h-poppins" style="font-size:28px">PassOn</div><div class="sub" style="text-align:center;max-width:280px;text-wrap:pretty">Pass on usable items to verified NGOs in Bandra and BKC.</div></div>' +
+      '<div class="seg" role="tablist"><button role="tab" aria-selected="' + !create + '" class="' + (create ? '' : 'on') + '" data-action="auth-mode" data-mode="signin"><i class="ti ti-user"></i>Sign in</button><button role="tab" aria-selected="' + create + '" class="' + (create ? 'on' : '') + '" data-action="auth-mode" data-mode="create"><i class="ti ti-plus"></i>Create account</button></div>' +
+      '<form class="col" id="authForm" style="gap:14px" autocomplete="off" novalidate>' +
+      (create ? '<div class="col" style="gap:10px"><span class="lab"><i class="ti ti-users"></i>I am a</span><div class="opts" style="grid-template-columns:1fr 1fr"><button type="button" class="opt' + (donorRole ? ' on' : '') + '" data-action="auth-role" data-role="donor"><i class="ti ti-user" style="font-size:18px;vertical-align:-3px"></i> Donor</button><button type="button" class="opt' + (!donorRole ? ' on' : '') + '" data-action="auth-role" data-role="org"><i class="ti ti-building-community" style="font-size:18px;vertical-align:-3px"></i> Organisation</button></div></div>' : '') +
+      '<label class="field"><span class="lab"><i class="ti ti-user"></i>' + (create && !donorRole ? 'Organisation name' : 'Your name') + '</span><input id="authName" type="text" maxlength="40" autocapitalize="words" required></label>' +
+      '<label class="field"><span class="lab"><i class="ti ti-lock"></i>Password</span><input id="authPass" type="password" minlength="4" required></label>' +
+      '<div class="small" id="authError" style="color:var(--amber-fg);min-height:20px"></div>' +
+      '<button type="submit" class="btn"><i class="ti ti-arrow-right"></i>' + (create ? 'Create account' : 'Sign in') + '</button>' +
+      '</form>' +
+      '<span class="note" style="justify-content:center"><i class="ti ti-lock"></i>Accounts are saved on this device only. This is a prototype.</span></div>';
+  }
+  function termsHTML() {
+    var t = state.terms, ok = t.terms && t.consent;
+    function box(key, title, text) {
+      var on = t[key];
+      return '<button type="button" class="cond' + (on ? ' on' : '') + '" data-action="term" data-key="' + key + '" role="checkbox" aria-checked="' + on + '"><span class="ring" style="border-radius:8px">' +
+        (on ? '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8.5l3.2 3L13 4.5" stroke="#2E7D32" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="24"/></svg>' : '') +
+        '</span><span style="display:flex;flex-direction:column;gap:2px"><span class="name">' + title + '</span><span class="desc">' + text + '</span></span></button>';
+    }
+    var donor = role() === 'donor';
+    return '<div class="wiz-head"><div class="wiz-top"><button class="back" data-action="signout"><i class="ti ti-arrow-left"></i>Sign out</button><span class="small">Before you start</span></div>' +
+      '<div class="title-22" style="margin-top:8px">Terms and consent</div><div class="sub">Hi ' + esc(myName()) + '. Please read and accept these to use PassOn.</div></div>' +
+      '<div class="wiz-body"><div class="terms">' +
+      '<div class="term"><i class="ti ti-heart"></i><span><b>Only clean, usable items.</b> Damaged, broken or stained items cannot be listed. If you would not give it to a friend, do not donate it.</span></div>' +
+      '<div class="term"><i class="ti ti-building-community"></i><span><b>Listings go to verified organisations only.</b> ' + (donor ? 'Your items are shown to registered NGOs, never to the public.' : 'You will only see donor listings for collection, and you agree to collect what you claim.') + '</span></div>' +
+      '<div class="term"><i class="ti ti-ban"></i><span><b>No money, no chat.</b> PassOn is free. There are no payments and no messaging. Handover details are set when an item is listed.</span></div>' +
+      '<div class="term"><i class="ti ti-hourglass"></i><span><b>Listings expire.</b> An item that is not claimed within ' + HOURS_TO_CLAIM + ' hours is removed from the feed.</span></div>' +
+      '<div class="term"><i class="ti ti-lock"></i><span><b>Your data.</b> Your name, listings' + (donor ? ', photos' : '') + ' and handover details are stored on this device and shown ' + (donor ? 'to the organisation that claims your item' : 'to the donor whose item you claim') + '. Nothing is sold or shared with anyone else.</span></div>' +
+      '</div>' +
+      box('terms', 'I accept the terms above', 'Including the rule on clean and usable items') +
+      box('consent', 'I consent to my details being shared', (donor ? 'My name, photos and handover details go to the NGO that claims my item' : 'My organisation name is shown to donors whose items I claim')) +
+      '</div>' +
+      '<div class="wiz-foot"><button id="termsBtn" class="btn' + (ok ? '' : ' disabled') + '" data-action="accept-terms" aria-disabled="' + !ok + '"><i class="ti ti-check"></i>' + (ok ? 'Agree and continue' : 'Tick both boxes to continue') + '</button></div>';
   }
   function feedHTML() {
     var items = feedListings().filter(function (l) { return state.filter === 'All' || l.cat === state.filter; });
@@ -324,7 +375,7 @@
     if (!items.length) cards = '<div class="empty"><div class="ic"><i class="ti ti-inbox"></i></div><span class="section-title">Nothing here right now</span><span class="sub">No donor has listed anything yet. When someone in Bandra or BKC gives an item, it appears here to claim.</span></div>';
     var count = items.length;
     return topbarHTML() +
-      '<div style="padding:8px 16px 4px;display:flex;flex-direction:column;gap:4px"><div class="title">Listings near ' + ORG_NAME + '</div><div class="small" id="feedCount">' + count + ' item' + (count === 1 ? '' : 's') + ' waiting · claim before they expire</div></div>' +
+      '<div style="padding:8px 16px 4px;display:flex;flex-direction:column;gap:4px"><div class="title">Listings near ' + esc(myName()) + '</div><div class="small" id="feedCount">' + count + ' item' + (count === 1 ? '' : 's') + ' waiting · claim before they expire</div></div>' +
       '<div class="filters">' + filters + '</div><div class="feed">' + cards + '</div>';
   }
   function needsHTML() {
@@ -435,7 +486,7 @@
     if (missing().length) { toast('Add a photo, category and condition first.', 'ti-ban'); go('give-details'); return; }
     var p = POINTS[d.point];
     var l = {
-      id: 'l' + Date.now(), title: d.cat + ' donation', cat: d.cat, cond: d.cond, count: 1, kg: KG[d.cat], owner: 'me', stage: 1,
+      id: 'l' + Date.now(), title: d.cat + ' donation', cat: d.cat, cond: d.cond, count: 1, kg: KG[d.cat], owner: myName(), stage: 1,
       photo: d.photo, hand: d.hand,
       where: d.hand === 'drop' ? p.name : 'Bandra West (your address)',
       when: d.hand === 'drop' ? p.when : DATES_LONG[d.date] + ', ' + SLOTS[d.slot],
@@ -453,7 +504,14 @@
     var el = e.target.closest('[data-action]');
     if (!el) return;
     var a = el.getAttribute('data-action'), d = state.draft;
-    if (a === 'switch') { db.role = el.getAttribute('data-role'); save(); state.claimedOpen = null; go(db.role === 'donor' ? 'home' : 'feed'); toast(db.role === 'donor' ? 'Now using PassOn as a donor' : 'Now using PassOn as ' + ORG_NAME, 'ti-switch-horizontal'); }
+    if (a === 'signout') { db.session = null; save(); state.claimedOpen = null; state.auth = { mode: 'signin', role: 'donor' }; state.terms = { terms: false, consent: false }; state.draft = freshDraft(); go('signin'); }
+    else if (a === 'auth-mode') { state.auth.mode = el.getAttribute('data-mode'); render(); }
+    else if (a === 'auth-role') { state.auth.role = el.getAttribute('data-role'); var nm = $('#authName').value, pw = $('#authPass').value; render(); $('#authName').value = nm; $('#authPass').value = pw; }
+    else if (a === 'term') { state.terms[el.getAttribute('data-key')] = !state.terms[el.getAttribute('data-key')]; render(); if (state.terms.terms && state.terms.consent) { var tb = $('#termsBtn'); if (tb) tb.classList.add('pulse'); } }
+    else if (a === 'accept-terms') {
+      if (!(state.terms.terms && state.terms.consent)) { toast('Please tick both boxes first.', 'ti-ban'); return; }
+      me().accepted = Date.now(); save(); go(role() === 'donor' ? 'home' : 'feed'); toast('Welcome to PassOn, ' + myName() + '.');
+    }
     else if (a === 'donate-need') { state.draft = freshDraft(); state.draft.cat = el.getAttribute('data-cat') || null; go('give'); }
     else if (a === 'pick-photo') { input.click(); }
     else if (a === 'retake') { d.photo = null; d.status = 'none'; render(); }
@@ -465,12 +523,12 @@
     else if (a === 'date') { d.date = +el.getAttribute('data-i'); render(); }
     else if (a === 'slot') { d.slot = +el.getAttribute('data-i'); render(); }
     else if (a === 'post') { postItem(); }
-    else if (a === 'back') { if (history.length > 1) history.back(); else go(db.role === 'donor' ? 'home' : 'feed'); }
+    else if (a === 'back') { if (history.length > 1) history.back(); else go(role() === 'donor' ? 'home' : 'feed'); }
     else if (a === 'filter') { state.filter = el.getAttribute('data-f'); render(); }
     else if (a === 'claim') {
       var id = el.getAttribute('data-id'), l = db.listings.filter(function (x) { return x.id === id; })[0];
       if (!l) return;
-      if (l.stage === 1) { l.stage = 2; l.claimedBy = ORG_NAME; save(); state.claimedOpen = id; render(); toast('Claimed. Handover details are below.', 'ti-hand-grab'); }
+      if (l.stage === 1) { l.stage = 2; l.claimedBy = myName(); save(); state.claimedOpen = id; render(); toast('Claimed. Handover details are below.', 'ti-hand-grab'); }
       else { state.claimedOpen = state.claimedOpen === id ? null : id; render(); }
     }
     else if (a === 'received') {
@@ -483,19 +541,42 @@
     else if (a === 'post-need') {
       var n = state.need, dl = new Date(Date.now() + DEADLINES[n.deadline][1] * 86400000);
       var by = dl.getDate() + ' ' + ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][dl.getMonth()];
-      db.needs.unshift({ id: 'n' + Date.now(), org: ORG_NAME, need: NEED_TYPES[n.type], detail: n.qty + ' pieces · by ' + by, photoLabel: 'photo · ' + NEED_TYPES[n.type].toLowerCase() });
+      db.needs.unshift({ id: 'n' + Date.now(), org: myName(), need: NEED_TYPES[n.type], detail: n.qty + ' pieces · by ' + by, photoLabel: 'photo · ' + NEED_TYPES[n.type].toLowerCase() });
       save(); state.need = { type: 0, qty: 20, deadline: 1 }; render(); toast('Posted. Donors can see this need now.');
     }
     else if (a === 'test-listing') {
-      db.listings.unshift({ id: 't' + Date.now(), title: 'Test listing', cat: 'Books', cond: 'Clean and usable', count: 1, kg: 0.3, owner: 'other', stage: 1, hand: 'drop', where: 'Carter Road promenade', when: 'Open daily, 8 am to 8 pm', dist: '0.6 km', photoLabel: 'photo · test item', createdAt: Date.now(), expiresAt: Date.now() + 120000 });
+      db.listings.unshift({ id: 't' + Date.now(), title: 'Test listing', cat: 'Books', cond: 'Clean and usable', count: 1, kg: 0.3, owner: 'Test donor', stage: 1, hand: 'drop', where: 'Carter Road promenade', when: 'Open daily, 8 am to 8 pm', dist: '0.6 km', photoLabel: 'photo · test item', createdAt: Date.now(), expiresAt: Date.now() + 120000 });
       save(); toast('Added. Open the organisation feed to watch it expire.', 'ti-hourglass');
     }
-    else if (a === 'reset') { localStorage.removeItem(KEY); state.removed = {}; state.fading = {}; state.filter = 'All'; state.claimedOpen = null; load(); render(); toast('All data cleared.', 'ti-refresh'); }
+    else if (a === 'reset') { if (!confirm('This removes every account, listing and need on this device. Continue?')) return; localStorage.removeItem(KEY); state.removed = {}; state.fading = {}; state.filter = 'All'; state.claimedOpen = null; state.terms = { terms: false, consent: false }; load(); go('signin'); toast('All data cleared.', 'ti-refresh'); }
   });
 
   // Keep a listing's step 1 photo tap working with the keyboard too
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('upload')) input.click();
+  });
+
+  // ---------- sign in / create account ----------
+  document.addEventListener('submit', function (e) {
+    if (e.target.id !== 'authForm') return;
+    e.preventDefault();
+    var name = $('#authName').value.trim(), pass = $('#authPass').value, err = $('#authError');
+    var key = name.toLowerCase();
+    if (!name) { err.textContent = 'Please enter a name.'; return; }
+    if (pass.length < 4) { err.textContent = 'Password needs at least 4 characters.'; return; }
+    if (state.auth.mode === 'create') {
+      if (db.accounts[key]) { err.textContent = 'That name is already taken. Sign in instead or pick another name.'; return; }
+      db.accounts[key] = { name: name, role: state.auth.role, pass: scramble(pass + '|' + key), accepted: null, createdAt: Date.now() };
+      db.session = key; save();
+      state.terms = { terms: false, consent: false };
+      go('terms');
+    } else {
+      var acc = db.accounts[key];
+      if (!acc || acc.pass !== scramble(pass + '|' + key)) { err.textContent = 'Wrong name or password. Check them and try again.'; return; }
+      db.session = key; save();
+      state.terms = { terms: false, consent: false };
+      go(acc.accepted ? (acc.role === 'donor' ? 'home' : 'feed') : 'terms');
+    }
   });
 
   // ---------- start ----------
